@@ -1,0 +1,77 @@
+{
+  "type": "object",
+  "description": "One Square seller account per agent. The service polls Square for new orders, payments and refunds and wakes this agent with a short summary; the agent looks into the details with the Square MCP server.",
+  "required": ["accessToken"],
+  "properties": {
+    "accessToken": {
+      "type": "string",
+      "format": "password",
+      "title": "Access token",
+      "description": "Square Developer Console → your application → Credentials → access token for the environment chosen below (needs ORDERS_READ, PAYMENTS_READ and MERCHANT_PROFILE_READ). Stored encrypted; never shown again."
+    },
+    "environment": {
+      "type": "string",
+      "title": "Environment",
+      "description": "production: connect.squareup.com. sandbox: connect.squareupsandbox.com. The token must belong to the same environment.",
+      "enum": ["production", "sandbox"],
+      "default": "production"
+    },
+    "locationIds": {
+      "type": "string",
+      "title": "Location IDs",
+      "description": "Square location IDs to watch, comma-separated. Empty: every active location of the account (looked up with MERCHANT_PROFILE_READ). Events at other locations are not reported.",
+      "default": ""
+    },
+    "pollIntervalSeconds": {
+      "type": "integer",
+      "title": "Poll interval (seconds)",
+      "description": "How often to ask Square for changes (10–3600).",
+      "default": 30,
+      "minimum": 10,
+      "maximum": 3600
+    },
+    "minAmount": {
+      "type": "number",
+      "title": "Minimum amount",
+      "description": "Report only events of at least this amount, in the currency's main unit (1000 = ¥1,000 or $1,000). 0 reports every amount. Warnings are always reported.",
+      "default": 0,
+      "minimum": 0
+    },
+    "notifyOrderCreated": {
+      "type": "boolean",
+      "title": "New orders",
+      "description": "order.created: an order created (or taken out of draft) since the last poll. An order that is already completed or canceled when first seen, such as a POS sale, is also reported when the toggle for that state is on.",
+      "default": true
+    },
+    "notifyOrderCompleted": {
+      "type": "boolean",
+      "title": "Orders completed",
+      "description": "order.state_changed to COMPLETED.",
+      "default": true
+    },
+    "notifyOrderCanceled": {
+      "type": "boolean",
+      "title": "Orders canceled",
+      "description": "order.state_changed to CANCELED.",
+      "default": true
+    },
+    "notifyPaymentCompleted": {
+      "type": "boolean",
+      "title": "Payments completed",
+      "description": "payment.completed.",
+      "default": true
+    },
+    "notifyPaymentFailed": {
+      "type": "boolean",
+      "title": "Payments failed or canceled",
+      "description": "payment.failed: a payment that ended FAILED or CANCELED.",
+      "default": true
+    },
+    "notifyRefunds": {
+      "type": "boolean",
+      "title": "Refunds",
+      "description": "refund: a new refund, or a refund whose status changed.",
+      "default": true
+    }
+  }
+}
