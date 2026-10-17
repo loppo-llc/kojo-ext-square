@@ -271,16 +271,16 @@ type Order struct {
 }
 
 type Payment struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	LocationID    string `json:"location_id"`
-	OrderID       string `json:"order_id"`
-	SourceType    string `json:"source_type"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
-	AmountMoney   *Money `json:"amount_money,omitempty"`
-	TotalMoney    *Money `json:"total_money,omitempty"`
-	RefundedMoney *Money `json:"refunded_money,omitempty"`
+	ID            string       `json:"id"`
+	Status        string       `json:"status"`
+	LocationID    string       `json:"location_id"`
+	OrderID       string       `json:"order_id"`
+	SourceType    string       `json:"source_type"`
+	CreatedAt     string       `json:"created_at"`
+	UpdatedAt     string       `json:"updated_at"`
+	AmountMoney   *Money       `json:"amount_money,omitempty"`
+	TotalMoney    *Money       `json:"total_money,omitempty"`
+	RefundedMoney *Money       `json:"refunded_money,omitempty"`
 	CardDetails   *CardDetails `json:"card_details,omitempty"`
 }
 
