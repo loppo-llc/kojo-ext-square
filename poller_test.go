@@ -355,6 +355,71 @@ func TestPaymentsAndRefunds(t *testing.T) {
 	if got := strings.Join(kinds(ev), ","); got != "refund:P4" || formatMoney(ev[0].Amount) != "1,500 JPY" {
 		t.Fatalf("fallback = %s %+v", got, ev)
 	}
+	// The refund record shows up a poll later: already reported.
+	c4 := c3.Add(time.Minute)
+	h.sq.do(func() {
+		h.sq.refunds = append(h.sq.refunds, Refund{ID: "R4", LocationID: "L1", PaymentID: "P4", Status: "PENDING", CreatedAt: ts(c3), UpdatedAt: ts(c4), AmountMoney: &Money{1500, "JPY"}})
+	})
+	if ev = h.cycle(time.Minute); len(ev) != 0 {
+		t.Fatalf("refund reported twice: %v", kinds(ev))
+	}
+	if _, ok := h.store.stream(streamRefunds).Seen[fallbackKey("P4")]; ok {
+		t.Fatal("credit not used up")
+	}
+	// Its later status change is still news.
+	h.sq.do(func() {
+		h.sq.refunds[1].Status, h.sq.refunds[1].UpdatedAt = "COMPLETED", ts(c4.Add(time.Minute))
+	})
+	if ev = h.cycle(time.Minute); strings.Join(kinds(ev), ",") != "refund:R4" || ev[0].PrevState != "PENDING" {
+		t.Fatalf("status change = %v", kinds(ev))
+	}
+}
+
+func TestSettledAfterInstall(t *testing.T) {
+	h := newHarness(t, `{"locationIds":"L1"}`)
+	h.cycle(0)
+	before := ts(t0.Add(-24 * time.Hour))
+	c := t0.Add(time.Minute)
+	type tl = CardPaymentTimeline
+	card := func(timeline tl) *CardDetails { return &CardDetails{Timeline: &timeline} }
+	h.sq.do(func() {
+		h.sq.payments = []Payment{
+			// Authorized before the install, captured after it.
+			{ID: "CAP", LocationID: "L1", Status: "COMPLETED", CreatedAt: before, UpdatedAt: ts(c), CardDetails: card(tl{CapturedAt: ts(c)})},
+			{ID: "VOID", LocationID: "L1", Status: "CANCELED", CreatedAt: before, UpdatedAt: ts(c), CardDetails: card(tl{VoidedAt: ts(c)})},
+			// Captured before the install, touched after it (a refund).
+			{ID: "OLD", LocationID: "L1", Status: "COMPLETED", CreatedAt: before, UpdatedAt: ts(c), CardDetails: card(tl{CapturedAt: before})},
+		}
+		h.sq.refunds = []Refund{
+			{ID: "RDONE", LocationID: "L1", Status: "COMPLETED", CreatedAt: before, UpdatedAt: ts(c), AmountMoney: &Money{100, "JPY"}},
+			{ID: "RPEND", LocationID: "L1", Status: "PENDING", CreatedAt: before, UpdatedAt: ts(c), AmountMoney: &Money{100, "JPY"}},
+		}
+	})
+	ev := h.cycle(time.Minute)
+	if got := strings.Join(kinds(ev), ","); got != "refund:RDONE,payment.completed:CAP,payment.failed:VOID" {
+		t.Fatalf("events = %s", got)
+	}
+	h.sq.do(func() { h.sq.refunds[1].Status, h.sq.refunds[1].UpdatedAt = "COMPLETED", ts(c.Add(time.Minute)) })
+	if ev := h.cycle(time.Minute); strings.Join(kinds(ev), ",") != "refund:RPEND" || ev[0].PrevState != "PENDING" {
+		t.Fatalf("events = %v", kinds(ev))
+	}
+}
+
+func TestCatchUpSkipsOverlap(t *testing.T) {
+	h := newHarness(t, `{"locationIds":"L1"}`)
+	cur := t0.Add(-time.Hour)
+	h.store.commit(map[string]*StreamState{streamOrders: {Cursor: cur, Floor: cur.Add(-time.Hour), CatchUp: true, Seen: map[string]Record{}}}, nil)
+	if r := h.p.begin(streamOrders, t0); !r.since.Equal(cur) {
+		t.Fatalf("catch-up since = %v", r.since)
+	}
+	h.cycle(0)
+	ss := h.store.stream(streamOrders)
+	if ss.CatchUp {
+		t.Fatal("catch-up not cleared by a complete poll")
+	}
+	if r := h.p.begin(streamOrders, t0); !r.since.Equal(cur.Add(-overlapWindow)) {
+		t.Fatalf("since = %v", r.since)
+	}
 }
 
 func TestFilters(t *testing.T) {

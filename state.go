@@ -47,6 +47,11 @@ type StreamState struct {
 	// reported: a fresh install does not backfill.
 	Floor time.Time         `json:"floor"`
 	Seen  map[string]Record `json:"seen"`
+	// CatchUp is set when the last poll was cut short at maxPages. The
+	// next query then starts at the cursor itself, not an overlap window
+	// before it, so a burst longer than the window cannot make every poll
+	// read the same pages. The overlap comes back once it has caught up.
+	CatchUp bool `json:"catchUp,omitempty"`
 }
 
 // State is everything persisted in the data directory.
@@ -146,7 +151,7 @@ func (s *Store) stream(name string) *StreamState {
 	if ss == nil {
 		return nil
 	}
-	cp := &StreamState{Cursor: ss.Cursor, Floor: ss.Floor, Seen: make(map[string]Record, len(ss.Seen))}
+	cp := &StreamState{Cursor: ss.Cursor, Floor: ss.Floor, CatchUp: ss.CatchUp, Seen: make(map[string]Record, len(ss.Seen))}
 	for k, v := range ss.Seen {
 		cp.Seen[k] = v
 	}

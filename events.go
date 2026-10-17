@@ -138,10 +138,15 @@ func paymentKind(status string) string {
 	return ""
 }
 
-// payments derives payment events. refundKnown reports whether the
-// refunds stream has already seen a refund of a payment; only payments
-// without one report a refunded_money increase themselves.
-func (d *deriver) payments(ss *StreamState, payments []Payment, refundKnown func(paymentID string) bool) []Event {
+// payments derives payment events.
+//
+// The refunds stream is the authority on refunds. A payment whose
+// refunded_money goes up while that stream has seen no refund of it yet
+// reports the increase itself, and leaves a credit in refunds (when
+// given) so the refund record, once it shows up, is not reported again
+// as new.
+func (d *deriver) payments(ss *StreamState, payments []Payment, refunds *StreamState) []Event {
+	refundKnown := refundIndex(refunds)
 	var out []Event
 	for _, p := range payments {
 		if p.ID == "" {
@@ -177,7 +182,9 @@ func (d *deriver) payments(ss *StreamState, payments []Payment, refundKnown func
 			ev.Kind, ev.PrevState = kind, prev.State
 			ev.ID = "payment:" + p.ID + ":" + fp + ":" + kind
 			out = append(out, ev)
-		case !known && atOrAfter(p.CreatedAt, d.since):
+		case !known && (atOrAfter(p.CreatedAt, d.since) || atOrAfter(p.settledAt(), d.since)):
+			// New, or older (an authorization from before the install)
+			// but captured / voided just now.
 			ev := base
 			ev.Kind = kind
 			ev.ID = "payment:" + p.ID + ":" + fp + ":" + kind
@@ -194,6 +201,11 @@ func (d *deriver) payments(ss *StreamState, payments []Payment, refundKnown func
 			ev.Amount = &Money{Amount: refunded - prev.Refunded, Currency: cur}
 			ev.ID = "payment-refund:" + p.ID + ":" + fp
 			out = append(out, ev)
+			if refunds != nil {
+				key := fallbackKey(p.ID)
+				c := refunds.Seen[key]
+				refunds.Seen[key] = Record{Fingerprint: "credit", State: cur, Refunded: c.Refunded + ev.Amount.Amount, UpdatedAt: upd}
+			}
 		}
 	}
 	return out
@@ -230,6 +242,16 @@ func (d *deriver) refunds(ss *StreamState, refunds []Refund) []Event {
 			}
 			ev.PrevState = prev.State
 		case atOrAfter(r.CreatedAt, d.since):
+			if consumeCredit(ss, r) {
+				// Already reported from the payment's refunded_money.
+				continue
+			}
+		case r.Status != "PENDING":
+			// Older than the window (from before the install) and settled
+			// just now: its PENDING state was never seen.
+			if consumeCredit(ss, r) {
+				continue
+			}
 		default:
 			continue
 		}
@@ -239,14 +261,39 @@ func (d *deriver) refunds(ss *StreamState, refunds []Refund) []Event {
 	return out
 }
 
+// fallbackKey is the refunds seen-set entry holding the amount already
+// reported from a payment's refunded_money.
+func fallbackKey(paymentID string) string { return "credit:" + paymentID }
+
+// consumeCredit reports whether a refund newly seen was already reported
+// through its payment's refunded_money, and uses up that credit.
+func consumeCredit(ss *StreamState, r Refund) bool {
+	key := fallbackKey(r.PaymentID)
+	c, ok := ss.Seen[key]
+	if r.PaymentID == "" || !ok || r.AmountMoney == nil || r.AmountMoney.Currency != c.State || r.AmountMoney.Amount > c.Refunded {
+		return false
+	}
+	c.Refunded -= r.AmountMoney.Amount
+	if c.Refunded <= 0 {
+		delete(ss.Seen, key)
+	} else {
+		ss.Seen[key] = c
+	}
+	return true
+}
+
 // refundIndex reports which payments the refunds stream knows a refund
-// of.
+// of (a refund record, or a credit from an earlier refunded_money
+// report).
 func refundIndex(ss *StreamState) func(string) bool {
 	set := map[string]bool{}
 	if ss != nil {
-		for _, r := range ss.Seen {
+		for key, r := range ss.Seen {
 			if r.PaymentID != "" {
 				set[r.PaymentID] = true
+			}
+			if id, ok := strings.CutPrefix(key, "credit:"); ok {
+				set[id] = true
 			}
 		}
 	}

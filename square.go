@@ -27,6 +27,9 @@ const (
 	// got, and the stream cursor stops there, so the rest is fetched on
 	// the next poll instead of being skipped.
 	maxPages = 40
+	// maxPagesStuckFactor × maxPages is the hard limit when the listing
+	// has not moved past its start yet (see pageCapReached).
+	maxPagesStuckFactor = 10
 
 	retryAttempts  = 5
 	retryBase      = time.Second
@@ -278,6 +281,31 @@ type Payment struct {
 	AmountMoney   *Money `json:"amount_money,omitempty"`
 	TotalMoney    *Money `json:"total_money,omitempty"`
 	RefundedMoney *Money `json:"refunded_money,omitempty"`
+	CardDetails   *CardDetails `json:"card_details,omitempty"`
+}
+
+type CardDetails struct {
+	Timeline *CardPaymentTimeline `json:"card_payment_timeline,omitempty"`
+}
+
+type CardPaymentTimeline struct {
+	CapturedAt string `json:"captured_at,omitempty"`
+	VoidedAt   string `json:"voided_at,omitempty"`
+}
+
+// settledAt is when a card payment reached its current terminal status
+// (captured or voided), or "" when Square does not say.
+func (p Payment) settledAt() string {
+	if p.CardDetails == nil || p.CardDetails.Timeline == nil {
+		return ""
+	}
+	switch p.Status {
+	case "COMPLETED":
+		return p.CardDetails.Timeline.CapturedAt
+	case "CANCELED":
+		return p.CardDetails.Timeline.VoidedAt
+	}
+	return ""
 }
 
 type Refund struct {
@@ -347,7 +375,7 @@ func (c *SquareClient) SearchOrders(ctx context.Context, locationIDs []string, s
 		}
 		var last string
 		for page := 0; ; page++ {
-			if page >= maxPages {
+			if page >= maxPages && pageCapReached(page, last, since) {
 				res.truncateAt(last)
 				break
 			}
@@ -385,7 +413,7 @@ func (c *SquareClient) ListPayments(ctx context.Context, locationID string, sinc
 	q.Set("limit", strconv.Itoa(listPageLimit))
 	var last string
 	for page := 0; ; page++ {
-		if page >= maxPages {
+		if page >= maxPages && pageCapReached(page, last, since) {
 			res.truncateAt(last)
 			break
 		}
@@ -422,7 +450,7 @@ func (c *SquareClient) ListRefunds(ctx context.Context, locationID string, since
 	q.Set("limit", strconv.Itoa(listPageLimit))
 	var last string
 	for page := 0; ; page++ {
-		if page >= maxPages {
+		if page >= maxPages && pageCapReached(page, last, since) {
 			res.truncateAt(last)
 			break
 		}
@@ -443,6 +471,19 @@ func (c *SquareClient) ListRefunds(ctx context.Context, locationID string, since
 		q.Set("cursor", out.Cursor)
 	}
 	return res, nil
+}
+
+// pageCapReached decides whether a listing that has read maxPages pages
+// may stop and resume from the last item next time. It may only once
+// that item is past since: resuming from since itself would read the same
+// pages again forever (thousands of changes within one instant). A hard
+// limit still stops a server that never ends a listing.
+func pageCapReached(page int, last string, since time.Time) bool {
+	if page >= maxPages*maxPagesStuckFactor {
+		return true
+	}
+	t, err := parseTime(last)
+	return err == nil && t.After(since)
 }
 
 func formatTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }

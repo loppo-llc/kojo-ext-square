@@ -289,3 +289,42 @@ func TestListPagesTruncate(t *testing.T) {
 		t.Fatalf("resume = %v, want %v", res.Resume, want)
 	}
 }
+
+func TestListPagesKeepGoingUntilPastSince(t *testing.T) {
+	since := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		at := since // thousands of changes stamped with one instant
+		if n > maxPages+4 {
+			at = since.Add(time.Second)
+		}
+		fmt.Fprintf(w, `{"refunds":[{"id":"R%d","updated_at":%q}],"cursor":"more"}`, n, formatTime(at))
+	}))
+	defer srv.Close()
+	c, _ := testSquareClient(srv.URL)
+	res, err := c.ListRefunds(context.Background(), "", since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != maxPages+5 || !res.Truncated || !res.Resume.After(since) {
+		t.Fatalf("pages=%d truncated=%v resume=%v", n, res.Truncated, res.Resume)
+	}
+}
+
+func TestListPagesHardLimit(t *testing.T) {
+	since := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		fmt.Fprintf(w, `{"refunds":[{"id":"R%d","updated_at":%q}],"cursor":"more"}`, n, formatTime(since))
+	}))
+	defer srv.Close()
+	c, _ := testSquareClient(srv.URL)
+	if _, err := c.ListRefunds(context.Background(), "", since); err != nil {
+		t.Fatal(err)
+	}
+	if n != maxPages*maxPagesStuckFactor {
+		t.Fatalf("pages=%d", n)
+	}
+}

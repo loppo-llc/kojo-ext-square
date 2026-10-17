@@ -141,9 +141,13 @@ type streamRun struct {
 	first bool
 	since time.Time
 	// cursor is where the stream's cursor moves when the cycle succeeds.
-	cursor  time.Time
-	touched bool
-	err     error
+	cursor    time.Time
+	truncated bool
+	touched   bool
+	// dirty marks a seen-set changed even though the stream's own fetch
+	// failed (refund credits written by the payments stream).
+	dirty bool
+	err   error
 }
 
 func (p *Poller) begin(name string, now time.Time) *streamRun {
@@ -154,6 +158,9 @@ func (p *Poller) begin(name string, now time.Time) *streamRun {
 		r.ss = &StreamState{Cursor: now, Floor: now, Seen: map[string]Record{}}
 	}
 	r.since = r.ss.Cursor.Add(-overlapWindow)
+	if r.ss.CatchUp {
+		r.since = r.ss.Cursor
+	}
 	if r.since.Before(r.ss.Floor) {
 		r.since = r.ss.Floor
 	}
@@ -171,8 +178,11 @@ func advance[T any](r *streamRun, res fetchResult[T], updatedAt func(T) string) 
 			r.cursor = t
 		}
 	}
-	if res.Truncated && res.Resume.Before(r.cursor) {
-		r.cursor = res.Resume
+	if res.Truncated {
+		r.truncated = true
+		if res.Resume.Before(r.cursor) {
+			r.cursor = res.Resume
+		}
 	}
 }
 
@@ -270,13 +280,15 @@ func (p *Poller) cycle(ctx context.Context) bool {
 	})
 	derive(pRun, func(d *deriver) []Event {
 		advance(pRun, payments, func(p Payment) string { return p.UpdatedAt })
-		var known func(string) bool
-		if rRun != nil && rRun.err == nil {
-			known = refundIndex(rRun.ss)
-		} else {
-			known = refundIndex(p.store.stream(streamRefunds))
+		var refundSS *StreamState
+		if rRun != nil {
+			refundSS = rRun.ss
 		}
-		return d.payments(pRun.ss, payments.Items, known)
+		evs := d.payments(pRun.ss, payments.Items, refundSS)
+		if rRun != nil && rRun.err != nil && len(evs) > 0 {
+			rRun.dirty = true // refund credits may have been added
+		}
+		return evs
 	})
 
 	var kept []Event
@@ -291,15 +303,17 @@ func (p *Poller) cycle(ctx context.Context) bool {
 	for _, r := range runs {
 		if r.err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", r.name, r.err))
-			if r.first {
+			if r.first || r.dirty {
 				// Remember the floor, so a later first success does not
-				// skip what happened in between.
+				// skip what happened in between (and any refund credits).
+				// The cursor stays where it was.
 				commit[r.name] = r.ss
 			}
 			continue
 		}
-		if r.first || r.touched || !r.cursor.Equal(r.ss.Cursor) {
+		if r.first || r.touched || r.truncated != r.ss.CatchUp || !r.cursor.Equal(r.ss.Cursor) {
 			r.ss.Cursor = r.cursor
+			r.ss.CatchUp = r.truncated
 			commit[r.name] = r.ss
 		}
 	}

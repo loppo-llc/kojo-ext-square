@@ -86,9 +86,9 @@ The message text is Japanese; the system prompt addition that comes with it tell
 | --- | --- |
 | `order.created` | An order created since the last poll, or an order taken out of `DRAFT`. Drafts themselves are not reported |
 | `order.state_changed` | A known order changed state (`state=OPEN→COMPLETED`), or an order first seen already `COMPLETED` / `CANCELED` that was closed after the install |
-| `payment.completed` | A payment reached `COMPLETED` |
-| `payment.failed` | A payment ended `FAILED` or `CANCELED` |
-| `refund` | A new refund, or a refund's status changed. If a payment's refunded amount goes up and no refund record for it has been seen, that is reported as a refund too |
+| `payment.completed` | A payment reached `COMPLETED` (including a card authorization from before the install that is captured after it) |
+| `payment.failed` | A payment ended `FAILED` or `CANCELED` (including a void after the install) |
+| `refund` | A new refund, a refund's status changed, or a refund from before the install that settled after it. If a payment's refunded amount goes up and no refund record for it has been seen, that is reported as a refund too, and the refund record that shows up later is not reported again as new |
 | `plugin.warning` / `plugin.recovered` | The extension's own trouble (below) |
 
 Up to 50 lines are listed; the rest are counted ("ほか N 件").
@@ -96,7 +96,7 @@ Up to 50 lines are listed; the rest are counted ("ほか N 件").
 ## How it works
 
 - **Polling**: every interval it calls SearchOrders (up to 10 locations per request), ListPayments (one location per request), and ListPaymentRefunds, each filtered on `updated_at` and sorted oldest first, following the pagination cursor. Every request sends `Square-Version: 2026-09-16`
-- **Position**: each stream (orders, payments, refunds) keeps a cursor, the newest `updated_at` seen. The next poll starts **2 minutes before** the cursor, to catch rows Square's eventually consistent search shows late. What comes back twice is recognised by a remembered fingerprint (version / status) per object and not reported again. The remembered set is bounded (5,000 objects per stream, oldest dropped first)
+- **Position**: each stream (orders, payments, refunds) keeps a cursor, the newest `updated_at` seen. The next poll starts **2 minutes before** the cursor, to catch rows Square's eventually consistent search shows late. What comes back twice is recognised by a remembered fingerprint (version / status) per object and not reported again. The remembered set is bounded (5,000 objects per stream, oldest dropped first). A poll that hits the page limit (40 pages per query) resumes from where it stopped, without the overlap, until it has caught up
 - **No loss on restart**: the position, the remembered set, and the not-yet-delivered events are saved together in `state.json` in the extension's data directory (written to a temp file, synced, and renamed). The position only moves forward in the same write that queues the events it found. A stream whose poll failed keeps its position and is retried
 - **Delivery**: the queued events become one message. With no turn running, it starts a new turn in session `square`. While the turn it started is still running, the message is **steered** into it. If the backend cannot steer, the message waits for the turn to end and becomes the next turn. If kojo is busy, down, or answers with an error, the events stay queued and are retried with backoff. Events leave the queue only once kojo has accepted them (so a crash at the wrong moment can repeat a notification, but never lose one). The queue is bounded at 1,000 events; if it ever overflows, the oldest are dropped and the next message says how many
 - **Rate limits and errors**: 429 and 5xx answers are retried with exponential backoff and jitter (honouring `Retry-After`). 401 / 403 are not retried
