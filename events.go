@@ -45,6 +45,9 @@ type deriver struct {
 	// at or after it counts as new.
 	since         time.Time
 	locationNames map[string]string
+	// credited is set when payments left a refund credit in the refunds
+	// stream, which then has to be saved.
+	credited bool
 }
 
 func (d *deriver) locName(id string) string { return d.locationNames[id] }
@@ -205,6 +208,7 @@ func (d *deriver) payments(ss *StreamState, payments []Payment, refunds *StreamS
 				key := fallbackKey(p.ID)
 				c := refunds.Seen[key]
 				refunds.Seen[key] = Record{Fingerprint: "credit", State: cur, Refunded: c.Refunded + ev.Amount.Amount, UpdatedAt: upd}
+				d.credited = true
 			}
 		}
 	}

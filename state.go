@@ -164,7 +164,9 @@ func (s *Store) commit(streams map[string]*StreamState, events []Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for name, ss := range streams {
-		pruneSeen(ss.Seen, maxSeenPerKey)
+		// Records the next query can return again are kept whatever the
+		// bound: forgetting one would report it again as new.
+		pruneSeen(ss.Seen, maxSeenPerKey, ss.Cursor.Add(-overlapWindow))
 		s.state.Streams[name] = ss
 	}
 	s.state.Outbox = append(s.state.Outbox, events...)
@@ -205,8 +207,9 @@ func (s *Store) ack(delivered []Event, dropped int) error {
 	return s.saveLocked()
 }
 
-// pruneSeen keeps the limit most recently updated records.
-func pruneSeen(seen map[string]Record, limit int) {
+// pruneSeen keeps the limit most recently updated records, and every
+// record updated at or after keepFrom.
+func pruneSeen(seen map[string]Record, limit int, keepFrom time.Time) {
 	if len(seen) <= limit {
 		return
 	}
@@ -225,6 +228,9 @@ func pruneSeen(seen map[string]Record, limit int) {
 		return all[i].id < all[j].id
 	})
 	for _, e := range all[:len(all)-limit] {
+		if !e.at.Before(keepFrom) {
+			break // sorted: the rest are newer still
+		}
 		delete(seen, e.id)
 	}
 }

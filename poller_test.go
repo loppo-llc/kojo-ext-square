@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -602,7 +603,7 @@ func TestStoreAtomicAndBounded(t *testing.T) {
 	}
 	seen := map[string]Record{}
 	for i := 0; i < maxSeenPerKey+10; i++ {
-		seen[string(rune('a'+i%26))+time.Duration(i).String()] = Record{UpdatedAt: t0.Add(time.Duration(i) * time.Second)}
+		seen[string(rune('a'+i%26))+time.Duration(i).String()] = Record{UpdatedAt: t0.Add(-2*time.Hour + time.Duration(i)*time.Second)}
 	}
 	var evs []Event
 	for i := 0; i < maxOutbox+5; i++ {
@@ -628,6 +629,43 @@ func TestStoreAtomicAndBounded(t *testing.T) {
 	out, dropped = s2.pending()
 	if len(out) != maxOutbox-10 || dropped != 0 {
 		t.Fatalf("after ack: %d %d", len(out), dropped)
+	}
+}
+
+func TestPruneKeepsTheQueryWindow(t *testing.T) {
+	s, _ := openStore(t.TempDir())
+	seen := map[string]Record{"old": {UpdatedAt: t0.Add(-time.Hour)}}
+	for i := 0; i < maxSeenPerKey+10; i++ {
+		seen[fmt.Sprint("burst", i)] = Record{UpdatedAt: t0.Add(-time.Minute)}
+	}
+	s.commit(map[string]*StreamState{streamOrders: {Cursor: t0, Floor: t0, Seen: seen}}, nil)
+	got := s.stream(streamOrders).Seen
+	if _, ok := got["old"]; ok || len(got) != maxSeenPerKey+10 {
+		t.Fatalf("seen = %d, old kept = %v", len(got), ok)
+	}
+}
+
+func TestRefundCreditSurvivesQuietRefundStream(t *testing.T) {
+	h := newHarness(t, `{"locationIds":"L1"}`)
+	h.cycle(0)
+	c := t0.Add(time.Minute)
+	h.sq.do(func() {
+		h.sq.payments = []Payment{{ID: "P1", LocationID: "L1", Status: "COMPLETED", CreatedAt: ts(c), UpdatedAt: ts(c), TotalMoney: &Money{900, "JPY"}}}
+	})
+	h.cycle(time.Minute)
+	// Much later (refunds list quiet throughout) the payment is refunded.
+	c2 := c.Add(30 * time.Minute)
+	h.clock = c2
+	h.sq.do(func() { h.sq.payments[0].RefundedMoney, h.sq.payments[0].UpdatedAt = &Money{900, "JPY"}, ts(c2) })
+	if ev := h.cycle(time.Minute); strings.Join(kinds(ev), ",") != "refund:P1" {
+		t.Fatalf("fallback = %v", kinds(ev))
+	}
+	h.open(`{"locationIds":"L1"}`) // restart: the credit was saved
+	h.sq.do(func() {
+		h.sq.refunds = []Refund{{ID: "R1", LocationID: "L1", PaymentID: "P1", Status: "COMPLETED", CreatedAt: ts(c2), UpdatedAt: ts(c2.Add(time.Minute)), AmountMoney: &Money{900, "JPY"}}}
+	})
+	if ev := h.cycle(time.Minute); len(ev) != 0 {
+		t.Fatalf("refund reported twice: %v", kinds(ev))
 	}
 }
 

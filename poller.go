@@ -144,8 +144,9 @@ type streamRun struct {
 	cursor    time.Time
 	truncated bool
 	touched   bool
-	// dirty marks a seen-set changed even though the stream's own fetch
-	// failed (refund credits written by the payments stream).
+	// dirty marks a seen-set changed by another stream (refund credits
+	// written by the payments stream); it is saved even when this
+	// stream's own fetch found nothing or failed.
 	dirty bool
 	err   error
 }
@@ -285,8 +286,8 @@ func (p *Poller) cycle(ctx context.Context) bool {
 			refundSS = rRun.ss
 		}
 		evs := d.payments(pRun.ss, payments.Items, refundSS)
-		if rRun != nil && rRun.err != nil && len(evs) > 0 {
-			rRun.dirty = true // refund credits may have been added
+		if d.credited {
+			rRun.dirty = true
 		}
 		return evs
 	})
@@ -311,7 +312,7 @@ func (p *Poller) cycle(ctx context.Context) bool {
 			}
 			continue
 		}
-		if r.first || r.touched || r.truncated != r.ss.CatchUp || !r.cursor.Equal(r.ss.Cursor) {
+		if r.first || r.touched || r.dirty || r.truncated != r.ss.CatchUp || !r.cursor.Equal(r.ss.Cursor) {
 			r.ss.Cursor = r.cursor
 			r.ss.CatchUp = r.truncated
 			commit[r.name] = r.ss
