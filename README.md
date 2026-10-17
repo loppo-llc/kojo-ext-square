@@ -121,6 +121,7 @@ Logs go to kojo's own log, tagged `extension=square`.
 - Square's search is eventually consistent; a change can show up a poll later than it happened
 - No webhooks: the delay is up to one poll interval plus Square's own lag
 - A very busy account (more than 40 pages of changes per stream per poll) is caught up over several polls
+- Payments and refunds created more than a year ago are not looked at (Square's default `begin_time` for these lists). Square does not allow refunds that late, so in practice nothing reportable is lost
 
 ## Development
 
