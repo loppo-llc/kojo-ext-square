@@ -10,13 +10,13 @@ An extension package that wakes a [kojo](https://github.com/loppo-llc/kojo) agen
 - Everything found in one poll reaches the agent **together, as one turn**; while the agent is still working on it, the next batch goes **into the running turn**
 - Filters by event type, minimum amount, and location
 
-It only **polls** Square's APIs: there is no webhook and no public URL to expose. It never calls a model itself either. The message the agent gets is a short list ("order X, 1,200 JPY, completed, at Shibuya"); the agent looks up the details (line items, customer, tenders) with the **Square MCP server** if it needs them.
+It only **polls** Square's APIs: there is no webhook and no public URL to expose. It never calls a model itself either. The message the agent gets is a short list ("order X, 1,200 JPY, completed, at Shibuya"); the agent looks up the details (line items, customer, tenders) with the extension's own **read-only MCP server** if it needs them.
 
 ## Requirements
 
 - A kojo build **newer than v0.135.0** (needs the `chat:session` scope and extension secret settings)
 - A Square seller account and an access token for it
-- For details, the agent should also have the [Square MCP server](https://github.com/square/square-mcp-server) set up. The extension works without it, but the agent then only sees the one-line summaries
+- Nothing else: the lookup tools come with the extension (see [Lookup tools](#lookup-tools)). Square's own MCP server is not needed
 
 ## 1. Square setup
 
@@ -30,6 +30,8 @@ A personal access token from the console has full access to its account. If you 
 | `ORDERS_READ` | SearchOrders |
 | `PAYMENTS_READ` | ListPayments, ListPaymentRefunds |
 | `MERCHANT_PROFILE_READ` | ListLocations (location names, and the location list when none are configured) |
+| `CUSTOMERS_READ` | Optional: the `get_customer` / `search_customers` lookup tools |
+| `ITEMS_READ` | Optional: the `search_catalog_items` lookup tool |
 
 > The token can read your sales. Do not paste it into chats or repositories. If it leaks, replace it in the Developer Console.
 
@@ -73,14 +75,14 @@ One message per poll that found something, in a dedicated session (`square`) sep
 
 ```
 [Square プラグイン (kojo-ext-square) からの自動通知]
-Square で 3 件の動きがありました。詳細 (明細・顧客・決済内容など) は Square MCP で確認してください。
+Square で 3 件の動きがありました。詳細 (明細・顧客・決済内容など) は square MCP の get_order / get_payment などで確認してください。
 
 - order.created | id=ORDER1 | 1,200 JPY | state=OPEN | items=コーヒー×2 | location=渋谷店 (L1)
 - payment.completed | id=PAY1 | 1,200 JPY | state=COMPLETED | order=ORDER1 | location=渋谷店 (L1)
 - refund | id=REF1 | 200 JPY | state=PENDING | payment=PAY0 | location=渋谷店 (L1)
 ```
 
-The message text is Japanese; the system prompt addition that comes with it tells the agent (in English) that this turn was started by the extension, that the details are in the Square MCP, and that its reply is not delivered anywhere — whatever it wants to do (tell someone in Slack, write a note, reply to a customer) it does with its own tools.
+The message text is Japanese; the system prompt addition that comes with it tells the agent (in English) that this turn was started by the extension, that the details are behind the extension's lookup tools, and that its reply is not delivered anywhere — whatever it wants to do (tell someone in Slack, write a note, reply to a customer) it does with its own tools.
 
 | Event | When |
 | --- | --- |
@@ -94,6 +96,23 @@ The message text is Japanese; the system prompt addition that comes with it tell
 Orders that record a return are labelled. Refunding a payment makes Square create a return-only order, shown as `order.created (return)` with `returned=` (the returned total), `returned_items=`, and `return_of=` (the original order, when Square links one). An order with both sold and returned items is `(exchange)`: the usual amount and `items=` are the sold side, `returned=` / `returned_items=` the returned side. The minimum-amount filter lets an event through if either side reaches it.
 
 Up to 50 lines are listed; the rest are counted ("ほか N 件").
+
+## Lookup tools
+
+The extension also gives each agent it is enabled for an MCP server named `square` (in Claude Code the tools appear as `mcp__square__…`). It uses the same access token and location setting as the poller, and it **only reads**: nothing in it creates, changes or cancels anything in Square.
+
+| Tool | What it returns |
+| --- | --- |
+| `list_locations` | The locations the agent may look at |
+| `search_orders` | Orders, newest first, as compact rows; filter by location, state, creation time, customer |
+| `get_order` | One order as Square returns it (line items, modifiers, notes, taxes, discounts, fulfillments, tenders, returns) |
+| `list_payments` | Payments at one location, newest first, as compact rows |
+| `get_payment` | One payment in full (card, fees, refunded amount, receipt) |
+| `list_refunds` / `get_refund` | Refunds, as compact rows / in full |
+| `get_customer` / `search_customers` | Customer profiles; search by partial email or phone (`CUSTOMERS_READ`) |
+| `search_catalog_items` | Catalog items by keyword, with variations and prices (`ITEMS_READ`) |
+
+When locations are configured, orders, payments, refunds and catalog items stay inside them: one at another location (or with no location) is refused, and list results are filtered. Customers are the exception: Square keeps them per account, not per location, so the customer tools see every customer the token can. The location setting narrows what the agent is shown; it is not an access boundary, since the token itself reaches the whole account. Leave out `CUSTOMERS_READ` if the agent should not see customers. Lists page with `limit` / `cursor`. The access token is fetched from kojo when the first tool runs, so it never appears in the MCP server's environment or command line.
 
 ## How it works
 

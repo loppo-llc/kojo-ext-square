@@ -4,7 +4,7 @@
 // It polls Square's Orders, Payments and Refunds APIs (no webhook, no
 // public URL), turns what changed into one short message per poll, and
 // hands that to the agent through kojo's ext-chat API. It never calls a
-// model itself; the agent looks into the details with the Square MCP
+// model itself; the agent looks into the details with this package's MCP
 // server.
 package main
 
@@ -36,6 +36,8 @@ func main() {
 	switch mode {
 	case "":
 		err = runService(ctx, loadEnv(), log)
+	case "mcp":
+		err = runMCP(ctx, loadEnv(), os.Stdin, os.Stdout, log)
 	case "version", "--version":
 		fmt.Println(version)
 	default:
@@ -75,7 +77,7 @@ func runService(ctx context.Context, env Env, log *slog.Logger) error {
 
 	if err != nil {
 		log.Warn("state reset", "err", err)
-		poller.note(kindWarning, "Square プラグインの保存状態が読めなかったため、現在時刻から監視を再開しました。直前の変更を取りこぼしている可能性があるので Square MCP で確認してください。")
+		poller.note(kindWarning, "Square プラグインの保存状態が読めなかったため、現在時刻から監視を再開しました。直前の変更を取りこぼしている可能性があるので square MCP の search_orders / list_payments / list_refunds で確認してください。")
 	}
 	for _, problem := range cfg.Problems {
 		log.Warn("settings problem", "problem", problem)

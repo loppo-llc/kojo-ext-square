@@ -199,3 +199,33 @@ func (c *KojoClient) Steer(ctx context.Context, sessionKey, content string) erro
 	}
 	return nil
 }
+
+// Secrets fetches the extension's secret settings for this agent. The
+// MCP server uses it: kojo keeps secrets out of an MCP server's
+// environment, which the backend CLI's command line would expose.
+func (c *KojoClient) Secrets(ctx context.Context) (map[string]string, error) {
+	u := c.base + "/api/v1/extension/secrets"
+	if c.agentID != "" {
+		u += "?agentId=" + url.QueryEscape(c.agentID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.short.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodeAPIError(resp)
+	}
+	var out struct {
+		Secrets map[string]string `json:"secrets"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Secrets, nil
+}

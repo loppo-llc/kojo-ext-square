@@ -1,10 +1,12 @@
 {
   "id": "square",
   "name": "Square",
-  "version": "0.1.0",
-  "description": "Wake a kojo agent when Square orders, payments or refunds change. Polls the Square API; no webhook or public URL needed.",
+  "version": "0.2.0",
+  "description": "Wake a kojo agent when Square orders, payments or refunds change, and let it look them up. Polls the Square API; no webhook or public URL needed.",
   "kojoVersion": ">0.135.0",
-  "scopes": ["chat:session"],
+  "scopes": [
+    "chat:session"
+  ],
   "contributes": {
     "service": {
       "scope": "per-agent",
@@ -19,6 +21,21 @@
     "settings": {
       "scope": "per-agent",
       "schema": "settings.schema.json"
-    }
+    },
+    "mcpServers": [
+      {
+        "name": "square",
+        "exec": {
+          "darwin/arm64": "bin/darwin-arm64/kojo-ext-square",
+          "darwin/amd64": "bin/darwin-amd64/kojo-ext-square",
+          "linux/amd64": "bin/linux-amd64/kojo-ext-square",
+          "linux/arm64": "bin/linux-arm64/kojo-ext-square",
+          "windows/amd64": "bin/windows-amd64/kojo-ext-square.exe"
+        },
+        "args": [
+          "mcp"
+        ]
+      }
+    ]
   }
 }

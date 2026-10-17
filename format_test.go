@@ -48,7 +48,7 @@ func TestFormatMessageBatch(t *testing.T) {
 	}
 	msg := formatMessage(events, 0)
 	lines := strings.Split(msg, "\n")
-	if !strings.Contains(lines[0], "Square プラグイン") || !strings.Contains(msg, "Square MCP") {
+	if !strings.Contains(lines[0], "Square プラグイン") || !strings.Contains(msg, "square MCP") {
 		t.Fatalf("header missing:\n%s", msg)
 	}
 	if !strings.Contains(msg, "3 件") {
