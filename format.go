@@ -64,7 +64,13 @@ func formatLine(e Event) string {
 	if e.isPluginNote() {
 		return "- " + e.Kind + ": " + e.Text
 	}
-	parts := []string{e.Kind, "id=" + e.ObjectID}
+	kind := e.Kind
+	if e.Return != "" {
+		// Return orders are bookkeeping for a refund or return; say so
+		// instead of looking like a new sale.
+		kind += " (" + e.Return + ")"
+	}
+	parts := []string{kind, "id=" + e.ObjectID}
 	if e.Amount != nil {
 		parts = append(parts, formatMoney(e.Amount))
 	}
@@ -77,6 +83,15 @@ func formatLine(e Event) string {
 	}
 	if e.Items != "" {
 		parts = append(parts, "items="+e.Items)
+	}
+	if e.ReturnAmount != nil {
+		parts = append(parts, "returned="+formatMoney(e.ReturnAmount))
+	}
+	if e.ReturnItems != "" {
+		parts = append(parts, "returned_items="+e.ReturnItems)
+	}
+	if e.ReturnOf != "" {
+		parts = append(parts, "return_of="+e.ReturnOf)
 	}
 	if e.OrderID != "" && e.OrderID != e.ObjectID {
 		parts = append(parts, "order="+e.OrderID)

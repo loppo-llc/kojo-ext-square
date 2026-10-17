@@ -21,13 +21,20 @@ const (
 // everything the message needs is captured when it is derived.
 type Event struct {
 	// ID is unique per (object, version, kind); acking uses it.
-	ID           string    `json:"id"`
-	Kind         string    `json:"kind"`
-	ObjectID     string    `json:"objectId,omitempty"`
-	Amount       *Money    `json:"amount,omitempty"`
-	State        string    `json:"state,omitempty"`
-	PrevState    string    `json:"prevState,omitempty"`
-	Items        string    `json:"items,omitempty"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	ObjectID  string `json:"objectId,omitempty"`
+	Amount    *Money `json:"amount,omitempty"`
+	State     string `json:"state,omitempty"`
+	PrevState string `json:"prevState,omitempty"`
+	Items     string `json:"items,omitempty"`
+	// Return is "return" for a return-only order and "exchange" for an
+	// order with both sold and returned items; ReturnAmount/ReturnItems
+	// are the returned side.
+	Return       string    `json:"return,omitempty"`
+	ReturnAmount *Money    `json:"returnAmount,omitempty"`
+	ReturnItems  string    `json:"returnItems,omitempty"`
+	ReturnOf     string    `json:"returnOf,omitempty"`
 	LocationID   string    `json:"locationId,omitempty"`
 	LocationName string    `json:"locationName,omitempty"`
 	OrderID      string    `json:"orderId,omitempty"`
@@ -102,6 +109,15 @@ func (d *deriver) orders(ss *StreamState, orders []Order) []Event {
 			LocationName: d.locName(o.LocationID),
 			OrderID:      o.ID,
 			At:           upd,
+		}
+		if o.hasReturns() {
+			ev.Return = "exchange"
+			if o.isPureReturn() {
+				ev.Return, ev.Amount = "return", nil
+			}
+			ev.ReturnAmount = moneyOf(o.returnMoney())
+			ev.ReturnItems = itemSummary(o.returnItems())
+			ev.ReturnOf = o.returnOf()
 		}
 		switch {
 		case o.State == "DRAFT":
@@ -318,7 +334,11 @@ func itemSummary(items []LineItem) string {
 		}
 		name := strings.Join(strings.Fields(it.Name), " ")
 		if name == "" {
-			name = "(no name)"
+			if it.ItemType == "CUSTOM_AMOUNT" {
+				name = "(custom amount)"
+			} else {
+				name = "(no name)"
+			}
 		}
 		name = truncateRunes(name, 40)
 		qty := strings.TrimSpace(it.Quantity)
@@ -390,8 +410,20 @@ func (c Config) passes(e Event) bool {
 	default:
 		return false
 	}
-	if c.MinAmount > 0 && e.Amount != nil {
-		if float64(abs64(e.Amount.Amount)) < c.MinAmount*pow10(currencyDecimals(e.Amount.Currency))-1e-9 {
+	if c.MinAmount > 0 {
+		// An event passes if any amount it carries (sold or returned)
+		// reaches the threshold; one with no known amount passes.
+		known, big := false, false
+		for _, m := range []*Money{e.Amount, e.ReturnAmount} {
+			if m == nil {
+				continue
+			}
+			known = true
+			if float64(abs64(m.Amount)) >= c.MinAmount*pow10(currencyDecimals(m.Currency))-1e-9 {
+				big = true
+			}
+		}
+		if known && !big {
 			return false
 		}
 	}

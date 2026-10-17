@@ -256,6 +256,18 @@ type Location struct {
 type LineItem struct {
 	Name     string `json:"name"`
 	Quantity string `json:"quantity"`
+	ItemType string `json:"item_type,omitempty"`
+}
+
+// OrderReturn is one return inside a return order: the order Square
+// creates when a payment is refunded or items are given back.
+type OrderReturn struct {
+	SourceOrderID   string     `json:"source_order_id"`
+	ReturnLineItems []LineItem `json:"return_line_items"`
+}
+
+type OrderMoneyAmounts struct {
+	TotalMoney *Money `json:"total_money,omitempty"`
 }
 
 type Order struct {
@@ -268,6 +280,51 @@ type Order struct {
 	ClosedAt   string     `json:"closed_at"`
 	TotalMoney *Money     `json:"total_money,omitempty"`
 	LineItems  []LineItem `json:"line_items"`
+	// Returns and ReturnAmounts are set on return orders, which carry no
+	// line items or total of their own.
+	Returns       []OrderReturn      `json:"returns,omitempty"`
+	ReturnAmounts *OrderMoneyAmounts `json:"return_amounts,omitempty"`
+}
+
+// hasReturns reports whether the order records a return: a return order
+// Square creates for a refund, or an exchange (sale and return in one).
+func (o Order) hasReturns() bool { return len(o.Returns) > 0 }
+
+// isPureReturn is a return-only order: nothing sold, so its own total is
+// absent or zero and only the returned side means anything.
+func (o Order) isPureReturn() bool {
+	return o.hasReturns() && len(o.LineItems) == 0 && (o.TotalMoney == nil || o.TotalMoney.Amount == 0)
+}
+
+// returnMoney is the returned total, if Square reports one.
+func (o Order) returnMoney() *Money {
+	if o.ReturnAmounts == nil {
+		return nil
+	}
+	return o.ReturnAmounts.TotalMoney
+}
+
+// returnItems is every returned line item across the order's returns.
+func (o Order) returnItems() []LineItem {
+	var out []LineItem
+	for _, r := range o.Returns {
+		out = append(out, r.ReturnLineItems...)
+	}
+	return out
+}
+
+// returnOf is the comma-joined source orders of the returns; unlinked
+// returns have none.
+func (o Order) returnOf() string {
+	var ids []string
+	seen := map[string]bool{}
+	for _, r := range o.Returns {
+		if r.SourceOrderID != "" && !seen[r.SourceOrderID] {
+			seen[r.SourceOrderID] = true
+			ids = append(ids, r.SourceOrderID)
+		}
+	}
+	return strings.Join(ids, ",")
 }
 
 type Payment struct {

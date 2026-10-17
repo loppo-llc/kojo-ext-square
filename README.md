@@ -91,6 +91,8 @@ The message text is Japanese; the system prompt addition that comes with it tell
 | `refund` | A new refund, a refund's status changed, or a refund from before the install that settled after it. If a payment's refunded amount goes up and no refund record for it has been seen, that is reported as a refund too, and the refund record that shows up later is not reported again as new |
 | `plugin.warning` / `plugin.recovered` | The extension's own trouble (below) |
 
+Orders that record a return are labelled. Refunding a payment makes Square create a return-only order, shown as `order.created (return)` with `returned=` (the returned total), `returned_items=`, and `return_of=` (the original order, when Square links one). An order with both sold and returned items is `(exchange)`: the usual amount and `items=` are the sold side, `returned=` / `returned_items=` the returned side. The minimum-amount filter lets an event through if either side reaches it.
+
 Up to 50 lines are listed; the rest are counted ("ほか N 件").
 
 ## How it works

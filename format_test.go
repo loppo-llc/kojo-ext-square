@@ -30,7 +30,7 @@ func TestFormatMoney(t *testing.T) {
 }
 
 func TestItemSummary(t *testing.T) {
-	items := []LineItem{{"コーヒー", "2"}, {"ケーキ", "1"}, {"", "3"}, {"水", "1"}, {"茶", "1"}}
+	items := []LineItem{{Name: "コーヒー", Quantity: "2"}, {Name: "ケーキ", Quantity: "1"}, {Quantity: "3"}, {Name: "水", Quantity: "1"}, {Name: "茶", Quantity: "1"}}
 	if got := itemSummary(items); got != "コーヒー×2, ケーキ×1, (no name)×3 +2 more" {
 		t.Fatalf("got %q", got)
 	}

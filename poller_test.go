@@ -200,7 +200,7 @@ func TestFirstRunNoBackfill(t *testing.T) {
 	h.sq.do(func() {
 		h.sq.orders = append(h.sq.orders, Order{ID: "NEW", LocationID: "L1", State: "OPEN", Version: i64(1),
 			CreatedAt: ts(t0.Add(10 * time.Second)), UpdatedAt: ts(t0.Add(10 * time.Second)),
-			TotalMoney: &Money{1200, "JPY"}, LineItems: []LineItem{{"コーヒー", "2"}}})
+			TotalMoney: &Money{1200, "JPY"}, LineItems: []LineItem{{Name: "コーヒー", Quantity: "2"}}})
 	})
 	ev := h.cycle(30 * time.Second)
 	if strings.Join(kinds(ev), ",") != "order.created:NEW" {
@@ -680,5 +680,51 @@ func TestStoreCorruptFileStartsFresh(t *testing.T) {
 	}
 	if s.stream(streamOrders) != nil {
 		t.Fatal("not fresh")
+	}
+}
+
+func TestReturnOrdersAreLabelled(t *testing.T) {
+	h := newHarness(t, `{"locationIds":"L1","minAmount":2}`)
+	h.cycle(0)
+	c := t0.Add(time.Minute)
+	mk := func(id string) Order {
+		return Order{ID: id, LocationID: "L1", State: "COMPLETED", Version: i64(1), CreatedAt: ts(c), UpdatedAt: ts(c), ClosedAt: ts(c)}
+	}
+	// Refund return order: linked, nothing sold.
+	ret := mk("R1")
+	ret.Returns = []OrderReturn{{SourceOrderID: "O1", ReturnLineItems: []LineItem{{Quantity: "1", ItemType: "CUSTOM_AMOUNT"}}}}
+	ret.ReturnAmounts = &OrderMoneyAmounts{TotalMoney: &Money{300, "USD"}}
+	// Unlinked return: no source order.
+	unl := mk("R2")
+	unl.Returns = []OrderReturn{{ReturnLineItems: []LineItem{{Name: "Mug", Quantity: "1"}}}}
+	unl.ReturnAmounts = &OrderMoneyAmounts{TotalMoney: &Money{500, "USD"}}
+	// Exchange: small sale, large return; the return amount clears minAmount.
+	exc := mk("X1")
+	exc.LineItems = []LineItem{{Name: "Tee S", Quantity: "1"}}
+	exc.TotalMoney = &Money{100, "USD"}
+	exc.Returns = []OrderReturn{{SourceOrderID: "O2", ReturnLineItems: []LineItem{{Name: "Tee M", Quantity: "1"}}}}
+	exc.ReturnAmounts = &OrderMoneyAmounts{TotalMoney: &Money{2500, "USD"}}
+	// Small return: filtered out.
+	small := mk("R3")
+	small.Returns = []OrderReturn{{SourceOrderID: "O3"}}
+	small.ReturnAmounts = &OrderMoneyAmounts{TotalMoney: &Money{100, "USD"}}
+	h.sq.do(func() { h.sq.orders = []Order{ret, unl, exc, small} })
+	ev := h.cycle(time.Minute)
+	if len(ev) != 3 {
+		t.Fatalf("%v", kinds(ev))
+	}
+	got := map[string]string{}
+	for _, e := range ev {
+		got[e.ObjectID] = formatLine(e)
+	}
+	want := map[string]string{
+		"R1": "- order.created (return) | id=R1 | state=COMPLETED | returned=3.00 USD | returned_items=(custom amount)×1 | return_of=O1 | location=",
+		"R2": "- order.created (return) | id=R2 | state=COMPLETED | returned=5.00 USD | returned_items=Mug×1 | location=",
+		"X1": "- order.created (exchange) | id=X1 | 1.00 USD | state=COMPLETED | items=Tee S×1 | returned=25.00 USD | returned_items=Tee M×1 | return_of=O2 | location=",
+	}
+	for id, w := range want {
+		if !strings.HasPrefix(got[id], w) {
+			t.Errorf("%s:\n got %s\nwant %s…", id, got[id], w)
+		}
 	}
 }
