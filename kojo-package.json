@@ -1,11 +1,11 @@
 {
   "id": "square",
   "name": "Square",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Wake a kojo agent when Square orders, payments or refunds change, and let it look them up. Polls the Square API; no webhook or public URL needed.",
   "kojoVersion": ">0.135.0",
   "scopes": [
-    "chat:session"
+    "chat:send"
   ],
   "contributes": {
     "service": {

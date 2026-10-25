@@ -14,7 +14,7 @@ It only **polls** Square's APIs: there is no webhook and no public URL to expose
 
 ## Requirements
 
-- A kojo build **newer than v0.135.0** (needs the `chat:session` scope and extension secret settings)
+- A kojo build **newer than v0.135.0** (needs the `chat:send` scope and extension secret settings; builds after v0.139.0 label the message as a system notice instead of a user message)
 - A Square seller account and an access token for it
 - Nothing else: the lookup tools come with the extension (see [Lookup tools](#lookup-tools)). Square's own MCP server is not needed
 
@@ -43,7 +43,7 @@ To restrict the extension to some locations you need their IDs: **Locations** in
 
 1. Open **Settings → Extensions** in kojo
 2. Enter `https://github.com/loppo-llc/kojo-ext-square` as the **repository URL** and click the button that inspects it
-3. Review the requested scope (`chat:session` — talk to the agent in a dedicated session) and approve the install
+3. Review the requested scope (`chat:send` — send messages to the agent) and approve the install
 4. Open **Square** in the installed list and enable it for the agent that should be woken
 5. Paste the access token into **Access token** in that agent's settings, pick the **Environment**, and save
 
@@ -71,10 +71,11 @@ The token is stored encrypted in kojo's credential store and never appears again
 
 ## What the agent receives
 
-One message per poll that found something, in a dedicated session (`square`) separate from the kojo UI chat:
+One message per poll that found something, posted into the agent's main chat, so the notice and the agent's reply show up in the kojo UI:
 
 ```
 [Square プラグイン (kojo-ext-square) からの自動通知]
+人ではなく拡張が自動で送っている。あなたの返答はこのチャットに表示され、ユーザーが読む。
 Square で 3 件の動きがありました。詳細 (明細・顧客・決済内容など) は square MCP の get_order / get_payment などで確認してください。
 
 - order.created | id=ORDER1 | 1,200 JPY | state=OPEN | items=コーヒー×2 | location=渋谷店 (L1)
@@ -119,7 +120,7 @@ When locations are configured, orders, payments, refunds and catalog items stay 
 - **Polling**: every interval it calls SearchOrders (up to 10 locations per request), ListPayments (one location per request), and ListPaymentRefunds, each filtered on `updated_at` and sorted oldest first, following the pagination cursor. Every request sends `Square-Version: 2026-09-16`
 - **Position**: each stream (orders, payments, refunds) keeps a cursor, the newest `updated_at` seen. The next poll starts **2 minutes before** the cursor, to catch rows Square's eventually consistent search shows late. What comes back twice is recognised by a remembered fingerprint (version / status) per object and not reported again. The remembered set is bounded (5,000 objects per stream, oldest dropped first). A poll that hits the page limit (40 pages per query) resumes from where it stopped, without the overlap, until it has caught up
 - **No loss on restart**: the position, the remembered set, and the not-yet-delivered events are saved together in `state.json` in the extension's data directory (written to a temp file, synced, and renamed). The position only moves forward in the same write that queues the events it found. A stream whose poll failed keeps its position and is retried
-- **Delivery**: the queued events become one message. With no turn running, it starts a new turn in session `square`. While the turn it started is still running, the message is **steered** into it. If the backend cannot steer, the message waits for the turn to end and becomes the next turn. If kojo is busy, down, or answers with an error, the events stay queued and are retried with backoff. Events leave the queue only once kojo has accepted them (so a crash at the wrong moment can repeat a notification, but never lose one). The queue is bounded at 1,000 events; if it ever overflows, the oldest are dropped and the next message says how many
+- **Delivery**: the queued events become one message. It is posted to the agent's main chat, which kojo accepts only while the agent is idle; a running turn answers busy and the message is retried every 15 seconds. If kojo is down or answers with another error, the events stay queued and are retried with backoff. Events leave the queue only once kojo has accepted them (so a crash at the wrong moment can repeat a notification, but never lose one). The queue is bounded at 1,000 events; if it ever overflows, the oldest are dropped and the next message says how many
 - **Rate limits and errors**: 429 and 5xx answers are retried with exponential backoff and jitter (honouring `Retry-After`). 401 / 403 are not retried
 - **Warnings**: when Square rejects the token (401) the agent is told right away; after 5 failed polls in a row for any other reason it is told once. When polling works again it is told once that things recovered. While the token is rejected, polling slows to every 5 minutes
 

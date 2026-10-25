@@ -122,6 +122,7 @@ func formatMessage(events []Event, dropped int) string {
 	}
 	var b strings.Builder
 	b.WriteString("[Square プラグイン (kojo-ext-square) からの自動通知]\n")
+	b.WriteString("人ではなく拡張が自動で送っている。あなたの返答はこのチャットに表示され、ユーザーが読む。\n")
 	if len(rest) > 0 {
 		b.WriteString("Square で " + strconv.Itoa(len(rest)) + " 件の動きがありました。詳細 (明細・顧客・決済内容など) は square MCP の get_order / get_payment などで確認してください。\n")
 	}
@@ -143,10 +144,3 @@ func formatMessage(events []Event, dropped int) string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
-
-// systemPromptExtra tells the agent where the turn came from.
-const systemPromptExtra = `This turn was started by the kojo Square extension (kojo-ext-square), not by a person. ` +
-	`It polls the Square API and reports new or changed orders, payments and refunds as one-line summaries; it never reads more than that. ` +
-	`For details (line items, customer, tenders, refund reasons) use the read-only tools of the "square" MCP server that comes with this extension (get_order, get_payment, get_refund, get_customer, search_orders, list_payments, list_refunds, search_customers, search_catalog_items, list_locations). ` +
-	`Your text reply in this session is not delivered to anyone: act through your tools, and use your usual channels if a person needs to know. ` +
-	`More notifications may arrive while you work; they are added to this turn.`
